@@ -13,7 +13,7 @@ for large directory trees.
 There are three parts to duq:
 
   duqbase - The baseline tool to store the current sizes in the database.
-  duqd - The daemon which runs to watch for inotiy events and updates the database.
+  duqd - The daemon which watches for inotiy events and updates the database.
   duq - The command which generates disk usage reports from the database.
 
 Since the duq command is merely summing up the total sizes for a column in the 
