@@ -1,0 +1,70 @@
+duq
+
+Quick 'du' for linux.
+
+OVERVIEW
+
+duq provides a mechanism to generate near-realtime disk usage reports for very large
+directory trees. It utilizes the inotify kernel API to watch a set of directories
+for changes. Changes are logged in a SQLite database. Disk usage reports are performed
+by querying this database. This results in a speed increase of 1000x or more over 'du'
+for large directory trees.
+
+There are three parts to duq:
+
+  duqbase - The baseline tool to store the current sizes in the database.
+  duqd - The daemon which runs to watch for inotiy events and updates the database.
+  duq - The command which generates disk usage reports from the database.
+
+Since the duq command is merely summing up the total sizes for a column in the 
+database and not hitting the filesystem at all, the results are generated much
+faster than by using 'du'.
+
+SETUP
+
+1 Install the startup script:
+	# cp startup.sh /etc/init.d/duqd
+	# chkconfig install duqd
+2 Start duqd:
+	# /etc/init.d/duqd startup
+3 Edit /etc/duq.conf. Add a single line for each directory you want duq to watch.
+4 Run duqbase to generate a baseline.
+	This will take a while (approximately as long as doing a normal 'du'
+	on those directories). The duq command will alert you that its results
+	may be incorrect while duqbase is running.
+5 Once duqbase is complete, use duq like du:
+
+	# duq /usr
+	6.2G      /usr
+
+  You can provide multiple dirs on the command line (or wildcards) to get results for
+  each dir:
+
+	# duq /usr/*
+	501M      /usr/bin
+	4.0K      /usr/etc
+	4.0K      /usr/games
+	127M      /usr/include
+	195M      /usr/java
+	1.6M      /usr/kerberos
+	1.8G      /usr/lib
+	790M      /usr/lib64
+	94M       /usr/libexec
+	2.0G      /usr/local
+	16K       /usr/lost+found
+	39M       /usr/sbin
+	1.5G      /usr/share
+	128M      /usr/src
+	8.0K      /usr/X11R6
+
+6 Re-run the baseline periodically. This will ensure that the sizes are kept in sync:
+
+  30 1 * * 0 /usr/local/bin/duqbase
+
+
+AUTHOR
+
+Joshua Weinberg
+Digabit, Inc.
+
+LICENSE
