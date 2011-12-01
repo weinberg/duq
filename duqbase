@@ -1,1 +1,104 @@
-/usr/local/bin/duqbase
+#!/usr/bin/perl
+#
+# duqbase - duq baseline
+#
+# Creates a baseline for all dirs listed in /etc/duq.conf
+# or alternatively any dirs listed on the command line.
+#
+# Joshua Weinberg - Digabit, Inc.
+# Fri Nov 11 15:01:13 MST 2011
+#
+
+use DBI;
+use Filesys::DiskUsage qw/du/;
+
+$DBFILE = "/var/lib/duq/duq.db";
+$CONF = "/etc/duq.conf";
+
+# Log pid to tell duq that a baseline is running
+open (PID,"> /var/run/duqbase.pid");
+print PID $$;
+close PID;
+
+$argCount = $#ARGV + 1;
+
+if ($argCount == 0 )
+{
+	# No Args:
+	# Lines to duqbase come from the config file
+	
+	open (CONF,$CONF) || die "duqbase: Cannot open '$CONF'\n";
+	$ln=1;
+	while (<CONF>)
+	{
+		chomp;
+		$line = $_;
+		if (!($line =~ /^\//))
+		{
+			print "WARNING: '$CONF' line $ln: Path must be fully qualified. Skipping.\n";
+		}
+		else
+		{
+			push @lines, $line;
+		}
+		$ln++;
+	}
+	
+	if ($#lines < 0)
+	{
+		print "No valid paths found in '$CONF'. Exiting.\n";
+		exit;
+	}
+}
+else
+{
+	# Args given, lines come from the args
+	@lines = @ARGV;
+}
+
+
+if (! -f $DBFILE)
+{
+	# Create database
+	$dbh = DBI->connect("dbi:SQLite:dbname=$DBFILE","","");
+	$rv = $dbh->do("CREATE TABLE pathsize (path TEXT PRIMARY KEY, size INT)");
+}
+else
+{
+	# Wipe the database
+	$dbh = DBI->connect("dbi:SQLite:dbname=$DBFILE","","");
+	$sth=$dbh->prepare(q{DELETE FROM pathsize WHERE path like ?});
+	foreach $DIR (@lines)
+	{
+		print "Cleaning DB: DELETE FROM pathsize WHERE path like \"$DIR%\"\n";
+		$sth->execute("$DIR%");
+	}
+}
+
+$sth=$dbh->prepare(q{INSERT OR REPLACE INTO pathsize VALUES (?,?)});
+
+foreach (@lines)
+{
+	$line = $_;
+	print "Creating baseline for $line... ";
+	open (FIND,"/usr/bin/find $line -type f -o -type d |");
+	while (<FIND>)
+	{
+		chomp;
+		$path = $_;
+		if (-d $path)
+		{
+			$size = -s $path;
+		}
+		elsif (-f $path)
+		{
+  			$size = du( { recursive => 0, sector-size => 1024 } , $path );
+		}
+		$sth->execute($path,$size);
+	}
+	print "done\n";
+}
+
+unlink "/var/run/duqbase.pid";
+
+print "Done.\n";
