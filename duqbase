@@ -78,7 +78,8 @@ else
 	$sth=$dbh->prepare(q{DELETE FROM pathsize WHERE path like ?});
 	foreach $DIR (@lines)
 	{
-		print "Cleaning DB: DELETE FROM pathsize WHERE path like \"$DIR%\"\n";
+		#print "Cleaning DB: DELETE FROM pathsize WHERE path like \"$DIR%\"\n";
+		print "Cleaning DB...\n";
 		$sth->execute("$DIR%");
 	}
 }
