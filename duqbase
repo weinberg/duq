@@ -54,6 +54,14 @@ else
 {
 	# Args given, lines come from the args
 	@lines = @ARGV;
+	foreach $DIR (@lines)
+	{
+		if (!($DIR =~ /^\//))
+		{
+			print "ERROR: dir '$DIR': Path must be fully qualified. Exiting.\n";
+			exit;
+		}
+	}
 }
 
 
