@@ -1,1 +1,115 @@
-/usr/local/bin/duq
+#!/usr/bin/perl
+#
+# duq - du quick
+#
+# Joshua Weinberg - Digabit, Inc.
+# Fri Nov 11 15:01:13 MST 2011
+#
+
+use DBI;
+use File::Spec;
+use Number::Bytes::Human qw(format_bytes);
+
+$DBFILE = "/var/lib/duq/duq.db";
+$CONF = "/etc/duq.conf";
+$COUNT = 0;
+
+if (-f "/var/run/duqbase.pid")
+{
+	print "WARNING: Baseline is running - results may be incorrect.\n";
+}
+
+# Read config
+
+open (CONF,$CONF);
+$found = 0;
+while (<CONF>)
+{
+	chomp;
+	$line = $_;
+	if ($line =~ /(.*)\/$/)
+	{
+		$line = $1;
+	}
+	
+	push (@conf,$line);
+}
+
+$argCount = $#ARGV+1;
+
+if ($argCount < 1)
+{
+	print "USAGE: duq path [path ...]\n";
+	exit;
+}
+
+if ($ARGV[0] eq "-c")
+{
+	$COUNT = 1;
+	shift;
+}
+
+if (! -f $DBFILE)
+{
+	print "ERROR: Cannot open duq database.\n";
+	exit;
+}
+
+# Open database
+$dbh = DBI->connect("dbi:SQLite:dbname=$DBFILE","","");
+if ($COUNT == 1)
+{
+	$sth = $dbh->prepare(q{SELECT COUNT(*) FROM pathsize WHERE path LIKE ?});
+}
+else
+{
+	$sth = $dbh->prepare(q{SELECT SUM(size) FROM pathsize WHERE path LIKE ?});
+}
+
+while ($DIR = shift @ARGV)
+{
+	$DIR = File::Spec->rel2abs($DIR);
+	if (! ($DIR =~ /^\//) )
+	{
+		print "ERROR: Error generating absolute path using rel2abs()\nSkipping\n";
+		cont;
+	}
+
+	# Check that path is being watched by duq
+	# BUG: This could be incorrect if the conf file has changed and duqd not restarted.
+	# TODO: Make duqd automatically notice config changes and reload.
+	foreach (@conf)
+	{
+		if ($DIR =~ /^$_/)
+		{
+			
+			$found = 1;
+			break;
+		}
+	}
+
+	if ($found == 0)
+	{
+		print "ERROR: '$DIR' is not being watched by duqd for changes.\n";
+		print "       Add '$DIR' to '$CONF'\n";
+		print "       and run duqbase to enable duq for this directory.\n";
+		print "Exiting\n";
+		exit;
+	}
+
+	$sth->execute("$DIR%");
+	@row = $sth->fetchrow_array();
+
+	if ($COUNT == 0)
+	{
+		$bytes = $row[0];
+		$size=format_bytes($bytes);
+		printf("%-10s%s\n",$size,$DIR);
+	}
+	else
+	{
+		$ct = $row[0];
+		printf("$ct\t$DIR\n");
+	}
+
+}
