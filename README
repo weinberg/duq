@@ -81,6 +81,22 @@ inotify-tools:
 
   30 1 * * 0 /usr/local/bin/duqbase
 
+--- CAVEATS ---
+
+Duq makes use of inotify and a sqlite3 database to track changes to your filesystem.
+There are a few drawbacks of this approach which users should be aware of. First, it
+is possible for the database to get out of sync with the filesystem. This can happen
+any time the duqd daemon is not running, during the boot or shutdown sequence or if it
+dies for some reason. This is why it is a good reason to run duqbase periodically to
+get the two back in sync.
+
+Secondly and possibly most importantly, duq can use a lot of memory. Inotify uses
+about 40 bytes per inode to do it's job and on a filesystem with millions of inodes
+this can result in a large amount of memory being taken up by this process. To make
+matters worse, since inotify is a kernel module the memory it allocates is not
+swappable so you really do lose all the memory it takes. For this reasone some may
+prefer to just run duqbase periodically and use duq to get an estimate of current disk
+space while not running duqd at all. In this case there is no memory impact at all.
 
 --- AUTHOR ---
 
