@@ -1,1 +1,143 @@
-/usr/local/bin/duqd
+#!/usr/bin/perl
+#
+# duqd - duq daemon
+#
+# Put dirs you want duqd to watch in /etc/duq.conf and
+# run duqbase. When baseline is complete you can use
+# duq to get very fast 'du' type results on very large
+# directory trees.
+#
+# Joshua Weinberg
+# Wed Nov  9 12:18:19 MST 2011
+# Digabit, Inc.
+#
+
+use DBI;
+use Proc::Daemon;
+use Filesys::DiskUsage qw/du/;
+
+$RUNFILE = "/var/run/duqd.status";
+open (RUNFILE,">$RUNFILE");
+print RUNFILE "running\n";
+close (RUNFILE);
+
+my $continue = 1;
+$SIG{TERM} = sub {
+			$continue=0;
+			# Writing to RUNFILE has the benefit of unblocking
+			# the while (<INOTIFYWAIT>) loop below and thus allowing
+			# the $continue var to be tested in the enclosing loop.
+			open (RUNFILE,">$RUNFILE");
+			print RUNFILE "stopping\n";
+			close (RUNFILE);
+		};
+
+Proc::Daemon::Init({ child_STDERR => '/var/log/duqd.err' });
+
+$now = `date`; chomp $now; print "$now: Duqd Starting\n";
+
+$DBFILE = "/var/lib/duq/duq.db";
+$CONF = "/etc/duq.conf";
+$INOTIFYWAIT = "/usr/local/bin/inotifywait";
+
+if (! -f $CONF)
+{
+	print "ERROR: Could not load configuration file: '$CONF'\n";
+	exit;
+}
+
+open (CONF,$CONF);
+$ln=1; $args="";
+while (<CONF>)
+{
+	chomp;
+	$line = $_;
+	if (!($line =~ /^\//))
+	{
+		print "WARNING: '$CONF' line $ln: Path must be fully qualified. Skipping.\n";
+	}
+	else
+	{
+		$args.=" $line";
+	}
+	$ln++;
+}
+
+if ($args eq "")
+{
+	print "ERROR: No directories to watch found in '$CONF'\n";
+	exit;
+}
+
+# Watch the runfile as well for changes to our status
+$args.=" $RUNFILE";
+
+$INOTIFYWAIT_COMMAND = "$INOTIFYWAIT -r -m -e close_write -e delete -e move --format '%e %w%f' $args";
+
+print "$INOTIFYWAIT_COMMAND\n";
+
+if (! -f $DBFILE)
+{
+	# Create database
+	$dbh = DBI->connect("dbi:SQLite:dbname=$DBFILE","","");
+	$rv = $dbh->do("CREATE TABLE pathsize (path TEXT PRIMARY KEY, size INT)");
+}
+else
+{
+	$dbh = DBI->connect("dbi:SQLite:dbname=$DBFILE","","");
+}
+
+$insert = $dbh->prepare(q{INSERT OR REPLACE INTO pathsize VALUES (?,?)});
+$delete = $dbh->prepare(q{DELETE FROM pathsize WHERE path = ?});
+
+open (INOTIFYWAIT, "$INOTIFYWAIT_COMMAND |");
+while (<INOTIFYWAIT>)
+{
+	if (!$continue)
+	{
+		break;
+	}
+	@line = split(/ /);
+	@events=split(/,/,$line[0]);
+	$path=$line[1];
+	chomp $path;
+	foreach $e (@events)
+	{
+		if ($e eq "CLOSE_WRITE")
+		{
+			print STDERR "close_write\n";
+			$size= -s $path;
+			if (defined $size)
+			{
+				print STDERR "close_write : $path : size=$size\n";
+				$insert->execute($path,$size);
+			}
+		}
+		elsif ($e eq "MOVED_TO")
+		{
+			print STDERR "move_to : $path\n";
+			$size= -s $path;
+			if (defined $size)
+			{
+				print STDERR "move_to : $path : size=$size\n";
+				$insert->execute($path,$size);
+			}
+		}
+		elsif ($e eq "MOVED_FROM")
+		{
+			print STDERR "move_from : $path\n";
+			$delete->execute($path);
+		}
+		elsif ($e eq "DELETE")
+		{
+			print STDERR "delete : $path\n";
+			$delete->execute($path);
+		}
+	}
+}
+
+# Need to write to this file to unblock the INOTIYWAIT again so the subprocess dies.
+open (RUNFILE,">$RUNFILE");
+print RUNFILE "stopped\n";
+close (RUNFILE);
+close INOTIFYWAIT;
